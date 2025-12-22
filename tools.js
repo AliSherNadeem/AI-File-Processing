@@ -6,7 +6,8 @@ import {
   writeExcelFile,
   createColumnMapping,
   transformRows,
-  validateExcelMapping
+  validateExcelMapping,
+  transformAndWriteFile
 } from './excelFunctions.js';
 import { combineNameFromRow } from './nameParser.js';
 import { consolidateAddressFromRow, looksLikeAddress } from './addressParser.js';
@@ -271,6 +272,7 @@ export const availableFunctions = {
   writeExcelFile,
   createColumnMapping,
   transformRows,
+  transformAndWriteFile,
   validateExcelMapping,
   analyzeColumnRelationships,
   combineNameFields,
@@ -287,20 +289,20 @@ export const functionDefinitions = [
       type: 'object',
       properties: {
         directory: { type: 'string', description: 'Directory path to list files from' },
-        extension: { type: 'string', description: 'Optional file extension filter (e.g., ".xlsx")' }
+        extension: { type: 'string', description: 'Optional file extension filter (e.g., ".xlsx", ".csv")' }
       },
       required: ['directory']
     }
   },
   {
     name: 'readExcelFileSample',
-    description: 'Reads a sample of rows from an Excel file to analyze column structure. Returns headers and 3-5 sample rows with data type inference. Use this first to understand the Excel file structure.',
+    description: 'Reads a sample of rows from an Excel (.xlsx) or CSV (.csv) file to analyze column structure. Returns headers and 3-5 sample rows with data type inference. Use this first to understand the file structure.',
     parameters: {
       type: 'object',
       properties: {
-        directory: { type: 'string', description: 'Directory path where Excel file is located (e.g., "./upload")' },
-        fileName: { type: 'string', description: 'Name of the Excel file to sample (e.g., "customers.xlsx")' },
-        sheetName: { type: 'string', description: 'Optional sheet name to read. If not specified, uses the first sheet.' },
+        directory: { type: 'string', description: 'Directory path where file is located (e.g., "./upload")' },
+        fileName: { type: 'string', description: 'Name of the Excel or CSV file to sample (e.g., "customers.xlsx", "data.csv")' },
+        sheetName: { type: 'string', description: 'Optional sheet name to read (only for Excel files). CSV files are read as single sheet.' },
         sampleSize: { type: 'number', description: 'Number of rows to sample (default: 5, max: 10)' }
       },
       required: ['directory', 'fileName']
@@ -419,13 +421,13 @@ export const functionDefinitions = [
   },
   {
     name: 'readExcelFileFull',
-    description: 'Reads all rows from an Excel file, with support for batch processing. Use this to get the actual data rows that need to be transformed.',
+    description: 'Reads all rows from an Excel (.xlsx) or CSV (.csv) file, with support for batch processing. Use this to get the actual data rows that need to be transformed.',
     parameters: {
       type: 'object',
       properties: {
-        directory: { type: 'string', description: 'Directory path where Excel file is located (e.g., "./upload")' },
-        fileName: { type: 'string', description: 'Name of the Excel file to read' },
-        sheetName: { type: 'string', description: 'Optional sheet name to read. If not specified, uses the first sheet.' },
+        directory: { type: 'string', description: 'Directory path where file is located (e.g., "./upload")' },
+        fileName: { type: 'string', description: 'Name of the Excel or CSV file to read' },
+        sheetName: { type: 'string', description: 'Optional sheet name to read (only for Excel files). If not specified, uses the first sheet. CSV files are read as single sheet.' },
         startRow: { type: 'number', description: 'Starting row number for batch processing (default: 0, first data row)' },
         batchSize: { type: 'number', description: 'Number of rows to read in this batch (default: 500, max: 500)' }
       },
@@ -457,6 +459,25 @@ export const functionDefinitions = [
     }
   },
   {
+    name: 'transformAndWriteFile',
+    description: 'EFFICIENT BATCH PROCESSING: Transforms an entire Excel/CSV file and writes output directly WITHOUT loading all rows into AI context. This is the RECOMMENDED approach for files with more than 100 rows. Instead of reading full file → transform → write separately, this does everything in one step server-side. The AI never sees the full dataset, avoiding context limits. Returns only a summary (rows processed, output file path). Use this instead of readExcelFileFull + transformRows + writeExcelFile for large files.',
+    parameters: {
+      type: 'object',
+      properties: {
+        sourceDirectory: { type: 'string', description: 'Source directory (e.g., "./upload")' },
+        sourceFileName: { type: 'string', description: 'Source file name (e.g., "data.xlsx" or "data.csv")' },
+        outputDirectory: { type: 'string', description: 'Output directory (e.g., "./output")' },
+        outputFileName: { type: 'string', description: 'Output file name (e.g., "processed_data.xlsx")' },
+        mapping: {
+          type: 'object',
+          description: 'Column mapping object from createColumnMapping (the mapping itself, not the ID)'
+        },
+        mappingId: { type: 'string', description: 'Mapping ID (for reference only, not used internally)' }
+      },
+      required: ['sourceDirectory', 'sourceFileName', 'outputDirectory', 'outputFileName', 'mapping', 'mappingId']
+    }
+  },
+  {
     name: 'validateExcelMapping',
     description: 'Validates that transformed sample data matches expected data types for each standard column. Use this after transforming your initial sample to verify the mapping works correctly before processing all rows.',
     parameters: {
@@ -476,12 +497,12 @@ export const functionDefinitions = [
   },
   {
     name: 'writeExcelFile',
-    description: 'Writes transformed data to an Excel file with the standard 10-column format. Each row must contain exactly 10 values corresponding to: Date, Name, Age, Address, Gender, Contact Number, Product Purchased, Amount, Product Quantity, Email (in that order). Empty columns should be empty strings.',
+    description: 'Writes transformed data to an Excel (.xlsx) or CSV (.csv) file with the standard 10-column format. File format is determined by the fileName extension. Each row must contain exactly 10 values corresponding to: Date, Name, Age, Address, Gender, Contact Number, Product Purchased, Amount, Product Quantity, Email (in that order). Empty columns should be empty strings.',
     parameters: {
       type: 'object',
       properties: {
-        directory: { type: 'string', description: 'Directory path where Excel file should be created. Use "./output" for output files.' },
-        fileName: { type: 'string', description: 'Name of the Excel file to create (e.g., "processed_customers.xlsx")' },
+        directory: { type: 'string', description: 'Directory path where file should be created. Use "./output" for output files.' },
+        fileName: { type: 'string', description: 'Name of the Excel or CSV file to create (e.g., "processed_customers.xlsx", "processed_data.csv"). Extension determines format.' },
         data: {
           type: 'array',
           description: 'Array of row arrays, where each row is an array of exactly 10 string values in standard column order',

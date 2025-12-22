@@ -39,6 +39,7 @@ export const SEMANTIC_MAPPING_RULES = {
     'phone', 'telephone', 'mobile', 'cell', 'contact', 'phone number',
     'contact number', 'tel', 'mobile number', 'cell phone', 'contact no',
     'phone_number', 'mobile_number', 'cellphone', 'cell_phone'
+    // NOTE: CNIC, NID, SSN, ID Number are NOT phone numbers - do not map these to Contact Number
   ],
   'Product Purchased': [
     'product', 'item', 'product name', 'item name', 'product purchased',

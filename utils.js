@@ -187,16 +187,93 @@ export function normalizeColumnName(columnName) {
 }
 
 /**
- * Format a value as string, handling various data types
+ * Check if a number is likely an Excel serial date
+ * Excel dates are stored as numbers (days since 1/1/1900)
+ * Valid range: ~1 to ~50000 (years 1900-2136)
+ * @param {number} num - Number to check
+ * @returns {boolean} - True if likely an Excel date
+ */
+function isExcelSerialDate(num) {
+  // Excel serial dates are typically between 1 (1/1/1900) and 50000 (year ~2036)
+  // Also check if it has decimal part (time component)
+  return num > 0 && num < 100000 && (num % 1 !== 0 || (num >= 1 && num <= 50000));
+}
+
+/**
+ * Convert Excel serial date to readable date string
+ * @param {number} serial - Excel serial number
+ * @returns {string} - Formatted date string (M/D/YYYY)
+ */
+function excelSerialToDate(serial) {
+  // Excel epoch is 1/1/1900 (but Excel incorrectly treats 1900 as a leap year)
+  const excelEpoch = new Date(1899, 11, 30); // December 30, 1899
+  const msPerDay = 86400000; // milliseconds in a day
+
+  // Calculate the date
+  const dateMs = excelEpoch.getTime() + (Math.floor(serial) * msPerDay);
+  const date = new Date(dateMs);
+
+  // Format as M/D/YYYY
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const year = date.getFullYear();
+
+  return `${month}/${day}/${year}`;
+}
+
+/**
+ * Format a value as string, handling various data types including Excel serial dates
  * @param {*} value - Value to format
+ * @param {string} columnHint - Optional hint about the column type (e.g., 'date')
  * @returns {string} - Formatted string value
  */
-export function formatValue(value) {
+export function formatValue(value, columnHint = '') {
   if (value === null || value === undefined) return '';
+
+  // Handle string values
   if (typeof value === 'string') return value.trim();
-  if (typeof value === 'number') return String(value);
+
+  // Handle boolean values
   if (typeof value === 'boolean') return value ? 'true' : 'false';
-  if (value instanceof Date) return value.toISOString().split('T')[0];
+
+  // Handle Date objects
+  if (value instanceof Date) {
+    const month = value.getMonth() + 1;
+    const day = value.getDate();
+    const year = value.getFullYear();
+    return `${month}/${day}/${year}`;
+  }
+
+  // Handle numbers
+  if (typeof value === 'number') {
+    // ONLY convert to date if column hint explicitly indicates it's a date column
+    const lowerHint = columnHint.toLowerCase();
+    const isDateColumn = lowerHint.includes('date') || lowerHint.includes('time') || lowerHint.includes('timestamp');
+
+    // Only apply date conversion if:
+    // 1. Column hint explicitly says it's a date, AND
+    // 2. The number is in a valid Excel date range, AND
+    // 3. NOT a column related to age, amount, quantity, price, cost, count, qty, number, units
+    const isNumericColumn = lowerHint.includes('age') || lowerHint.includes('amount') ||
+                            lowerHint.includes('quantity') || lowerHint.includes('price') ||
+                            lowerHint.includes('cost') || lowerHint.includes('qty') ||
+                            lowerHint.includes('count') || lowerHint.includes('number') ||
+                            lowerHint.includes('units') || lowerHint.includes('total');
+
+    if (isDateColumn && !isNumericColumn && isExcelSerialDate(value)) {
+      // Try to convert as Excel serial date
+      try {
+        return excelSerialToDate(value);
+      } catch (e) {
+        // If conversion fails, return as string
+        return String(value);
+      }
+    }
+
+    // Regular number - return as-is
+    return String(value);
+  }
+
   return String(value);
 }
 

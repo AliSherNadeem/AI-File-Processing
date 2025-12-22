@@ -17,11 +17,11 @@ import {
 const columnMappings = new Map();
 
 /**
- * Read and analyze a sample of rows from an Excel file
+ * Read and analyze a sample of rows from an Excel/CSV file
  * @param {Object} params - Function parameters
- * @param {string} params.directory - Directory path where Excel file is located
- * @param {string} params.fileName - Name of the Excel file to sample
- * @param {string} params.sheetName - Optional sheet name to read
+ * @param {string} params.directory - Directory path where file is located
+ * @param {string} params.fileName - Name of the Excel/CSV file to sample
+ * @param {string} params.sheetName - Optional sheet name to read (for Excel files)
  * @param {number} params.sampleSize - Number of rows to sample (default: 5, max: 10)
  * @returns {Object} - Sample data with column analysis
  */
@@ -36,27 +36,35 @@ export async function readExcelFileSample({ directory, fileName, sheetName, samp
       throw new Error(`File not found: ${filePath}`);
     }
 
-    // Read the workbook
+    // Determine file type
+    const isCSV = fileName.toLowerCase().endsWith('.csv');
+    const fileType = isCSV ? 'CSV' : 'Excel';
+
+    // Read the workbook (XLSX library supports both Excel and CSV)
     let workbook;
     try {
       workbook = XLSX.readFile(filePath);
     } catch (error) {
-      throw new Error(`Invalid file format: ${fileName} is not a valid Excel file`);
+      throw new Error(`Invalid file format: ${fileName} is not a valid ${fileType} file`);
     }
 
     // Check if workbook has sheets
     if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
-      throw new Error('Excel file has no sheets');
+      throw new Error(`${fileType} file has no data`);
     }
 
-    // Get the sheet
+    // Get the sheet (CSV files have one sheet)
     const actualSheetName = sheetName || workbook.SheetNames[0];
     const sheet = workbook.Sheets[actualSheetName];
 
     if (!sheet) {
-      throw new Error(
-        `Sheet not found: ${sheetName}. Available sheets: ${workbook.SheetNames.join(', ')}`
-      );
+      if (isCSV) {
+        throw new Error(`CSV file has no data`);
+      } else {
+        throw new Error(
+          `Sheet not found: ${sheetName}. Available sheets: ${workbook.SheetNames.join(', ')}`
+        );
+      }
     }
 
     // Convert sheet to array of arrays
@@ -100,7 +108,7 @@ export async function readExcelFileSample({ directory, fileName, sheetName, samp
     // Extract sample rows from non-empty data rows
     const sampleRows = sampleIndices.map(idx => {
       const row = nonEmptyDataRows[idx] || [];
-      return headers.map((_, colIdx) => formatValue(row[colIdx]));
+      return headers.map((header, colIdx) => formatValue(row[colIdx], header));
     });
 
     // Analyze columns
@@ -221,7 +229,8 @@ export async function transformRows({ mappingId, sourceRows, sourceHeaders }) {
 
           if (sourceIndex !== undefined && sourceRow[sourceIndex] !== undefined) {
             // Get value from source row and format it
-            transformedRow.push(formatValue(sourceRow[sourceIndex]));
+            // Pass the source column name as a hint for proper formatting (especially for dates)
+            transformedRow.push(formatValue(sourceRow[sourceIndex], sourceColumnName));
           } else {
             // Source column not found or no value - add empty string
             transformedRow.push('');
@@ -246,11 +255,11 @@ export async function transformRows({ mappingId, sourceRows, sourceHeaders }) {
 }
 
 /**
- * Read all rows from an Excel file in batches
+ * Read all rows from an Excel/CSV file in batches
  * @param {Object} params - Function parameters
- * @param {string} params.directory - Directory path where Excel file is located
- * @param {string} params.fileName - Name of the Excel file to read
- * @param {string} params.sheetName - Optional sheet name to read
+ * @param {string} params.directory - Directory path where file is located
+ * @param {string} params.fileName - Name of the Excel/CSV file to read
+ * @param {string} params.sheetName - Optional sheet name to read (for Excel files)
  * @param {number} params.startRow - Starting row number for batch processing (default: 0)
  * @param {number} params.batchSize - Number of rows to read in this batch
  * @returns {Object} - Batch of rows with metadata
@@ -266,20 +275,24 @@ export async function readExcelFileFull({ directory, fileName, sheetName, startR
       throw new Error(`File not found: ${filePath}`);
     }
 
-    // Read the workbook
+    // Determine file type
+    const isCSV = fileName.toLowerCase().endsWith('.csv');
+    const fileType = isCSV ? 'CSV' : 'Excel';
+
+    // Read the workbook (XLSX library supports both Excel and CSV)
     let workbook;
     try {
       workbook = XLSX.readFile(filePath);
     } catch (error) {
-      throw new Error(`Invalid file format: ${fileName} is not a valid Excel file`);
+      throw new Error(`Invalid file format: ${fileName} is not a valid ${fileType} file`);
     }
 
-    // Get the sheet
+    // Get the sheet (CSV files have one sheet)
     const actualSheetName = sheetName || workbook.SheetNames[0];
     const sheet = workbook.Sheets[actualSheetName];
 
     if (!sheet) {
-      throw new Error(`Sheet not found: ${sheetName}`);
+      throw new Error(isCSV ? `CSV file has no data` : `Sheet not found: ${sheetName}`);
     }
 
     // Convert sheet to array of arrays
@@ -317,7 +330,7 @@ export async function readExcelFileFull({ directory, fileName, sheetName, startR
     const rows = [];
     for (let i = startRow; i < endRow; i++) {
       const row = nonEmptyDataRows[i] || [];
-      rows.push(headers.map((_, colIdx) => formatValue(row[colIdx])));
+      rows.push(headers.map((header, colIdx) => formatValue(row[colIdx], header)));
     }
 
     // Check if there are more rows
@@ -341,10 +354,147 @@ export async function readExcelFileFull({ directory, fileName, sheetName, startR
 }
 
 /**
- * Write data to an Excel file with the standard 10-column format
+ * Transform and write Excel/CSV file in batches (for large files)
+ * This function processes the entire file without loading all rows into AI context
  * @param {Object} params - Function parameters
- * @param {string} params.directory - Directory path where Excel file should be created
- * @param {string} params.fileName - Name of the Excel file to create
+ * @param {string} params.sourceDirectory - Source directory path
+ * @param {string} params.sourceFileName - Source file name
+ * @param {string} params.outputDirectory - Output directory path
+ * @param {string} params.outputFileName - Output file name
+ * @param {Object} params.mapping - Column mapping object
+ * @param {string} params.mappingId - Mapping ID (not used, for compatibility)
+ * @returns {Object} - Transformation summary (NOT the actual data)
+ */
+export async function transformAndWriteFile({ sourceDirectory, sourceFileName, outputDirectory, outputFileName, mapping, mappingId }) {
+  try {
+    const sourceFilePath = path.join(sourceDirectory, sourceFileName);
+    const outputFilePath = path.join(outputDirectory, outputFileName);
+
+    // Check if source file exists
+    try {
+      await fs.access(sourceFilePath);
+    } catch {
+      throw new Error(`Source file not found: ${sourceFilePath}`);
+    }
+
+    // Determine file type
+    const isCSV = sourceFileName.toLowerCase().endsWith('.csv');
+    const fileType = isCSV ? 'CSV' : 'Excel';
+
+    // Read the source workbook
+    let workbook;
+    try {
+      workbook = XLSX.readFile(sourceFilePath);
+    } catch (error) {
+      throw new Error(`Invalid file format: ${sourceFileName} is not a valid ${fileType} file`);
+    }
+
+    // Get the first sheet
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+
+    if (!sheet) {
+      throw new Error('Source file has no data');
+    }
+
+    // Convert sheet to array of arrays
+    const data = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+    if (data.length === 0) {
+      throw new Error('Source file is empty');
+    }
+
+    // Extract headers and data rows
+    const sourceHeaders = data[0].map(h => String(h || '').trim());
+    const isRowEmpty = (row) => {
+      if (!row || !Array.isArray(row)) return true;
+      return row.every(cell => cell === null || cell === undefined || cell === '');
+    };
+    const nonEmptyDataRows = data.slice(1).filter(row => !isRowEmpty(row));
+
+    // Validate mapping
+    if (!mapping || typeof mapping !== 'object') {
+      throw new Error('Invalid mapping object');
+    }
+
+    // Create source index map
+    const sourceIndexMap = {};
+    sourceHeaders.forEach((header, index) => {
+      sourceIndexMap[header] = index;
+    });
+
+    // Process all rows in batches internally
+    const transformedRows = [];
+    const batchSize = 100; // Process 100 rows at a time
+    let processedCount = 0;
+
+    for (let startIdx = 0; startIdx < nonEmptyDataRows.length; startIdx += batchSize) {
+      const endIdx = Math.min(startIdx + batchSize, nonEmptyDataRows.length);
+      const batch = nonEmptyDataRows.slice(startIdx, endIdx);
+
+      // Transform this batch
+      for (const sourceRow of batch) {
+        const transformedRow = [];
+
+        // For each of the 10 standard columns
+        for (const standardColumn of STANDARD_COLUMNS) {
+          const sourceColumnName = mapping[standardColumn];
+
+          if (!sourceColumnName || sourceColumnName.trim() === '') {
+            transformedRow.push('');
+          } else {
+            const sourceIndex = sourceIndexMap[sourceColumnName];
+
+            if (sourceIndex !== undefined && sourceRow[sourceIndex] !== undefined) {
+              transformedRow.push(formatValue(sourceRow[sourceIndex], sourceColumnName));
+            } else {
+              transformedRow.push('');
+            }
+          }
+        }
+
+        transformedRows.push(transformedRow);
+        processedCount++;
+      }
+    }
+
+    // Create output workbook
+    const outputWorkbook = XLSX.utils.book_new();
+    const outputData = [STANDARD_COLUMNS, ...transformedRows];
+    const outputSheet = XLSX.utils.aoa_to_sheet(outputData);
+    XLSX.utils.book_append_sheet(outputWorkbook, outputSheet, 'Sheet1');
+
+    // Ensure output directory exists
+    try {
+      await fs.access(outputDirectory);
+    } catch {
+      await fs.mkdir(outputDirectory, { recursive: true });
+    }
+
+    // Write file
+    XLSX.writeFile(outputWorkbook, outputFilePath);
+
+    // Return ONLY summary - NOT the actual data
+    return {
+      success: true,
+      message: `Transformed and wrote ${processedCount} rows to ${outputFileName}`,
+      sourceFile: sourceFileName,
+      outputFile: outputFileName,
+      rowsProcessed: processedCount,
+      columnsOutput: 10,
+      filePath: outputFilePath
+    };
+
+  } catch (error) {
+    return createErrorResponse('transformAndWriteFile', error);
+  }
+}
+
+/**
+ * Write data to an Excel or CSV file with the standard 10-column format
+ * @param {Object} params - Function parameters
+ * @param {string} params.directory - Directory path where file should be created
+ * @param {string} params.fileName - Name of the Excel/CSV file to create
  * @param {Array<Array<string>>} params.data - Array of row arrays in standard 10-column format
  * @param {boolean} params.append - If true, append to existing file; if false, create new file
  * @returns {Object} - File creation result
@@ -365,6 +515,10 @@ export async function writeExcelFile({ directory, fileName, data, append = false
     }
 
     const filePath = path.join(directory, fileName);
+
+    // Determine output file type
+    const isCSV = fileName.toLowerCase().endsWith('.csv');
+    const fileType = isCSV ? 'CSV' : 'Excel';
 
     let finalData;
 
@@ -396,15 +550,16 @@ export async function writeExcelFile({ directory, fileName, data, append = false
     // Ensure output directory exists
     await fs.mkdir(directory, { recursive: true });
 
-    // Write file
+    // Write file (XLSX library automatically handles CSV format based on extension)
     XLSX.writeFile(workbook, filePath);
 
     return {
       success: true,
       filePath,
-      message: append ? `Appended ${data.length} rows to ${fileName}` : `File created: ${fileName}`,
+      message: append ? `Appended ${data.length} rows to ${fileName}` : `${fileType} file created: ${fileName}`,
       rowsWritten: data.length,
-      columns: 10
+      columns: 10,
+      fileType
     };
 
   } catch (error) {
