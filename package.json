@@ -1,0 +1,26 @@
+{
+  "name": "ai-excel-processor",
+  "version": "2.0.0",
+  "description": "AI-powered Excel processing using Ollama qwen3-coder:480b-cloud - Intelligently maps varying data structures to standardized 10-column format",
+  "main": "process-excel-ai.js",
+  "type": "module",
+  "scripts": {
+    "start": "node process-excel-ai.js",
+    "test": "node test-functions.js"
+  },
+  "keywords": [
+    "excel",
+    "ollama",
+    "ai",
+    "data-processing",
+    "qwen",
+    "automation"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.6.2",
+    "dotenv": "^16.3.1",
+    "xlsx": "^0.18.5"
+  }
+}
