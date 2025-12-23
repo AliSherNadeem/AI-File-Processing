@@ -12,6 +12,8 @@ import {
   createErrorResponse,
   formatValue
 } from './utils.js';
+import { combineName } from './nameParser.js';
+import { consolidateAddressFields } from './addressParser.js';
 
 // Store column mappings in memory
 const columnMappings = new Map();
@@ -363,12 +365,33 @@ export async function readExcelFileFull({ directory, fileName, sheetName, startR
  * @param {string} params.outputFileName - Output file name
  * @param {Object} params.mapping - Column mapping object
  * @param {string} params.mappingId - Mapping ID (not used, for compatibility)
+ * @param {Object} params.nameColumns - Optional: { firstName, lastName, middleName } for combining names
+ * @param {Object} params.addressComponents - Optional: { street, city, state, country, postal, apartment } for consolidating addresses
  * @returns {Object} - Transformation summary (NOT the actual data)
  */
-export async function transformAndWriteFile({ sourceDirectory, sourceFileName, outputDirectory, outputFileName, mapping, mappingId }) {
+export async function transformAndWriteFile({ sourceDirectory, sourceFileName, outputDirectory, outputFileName, mapping, mappingId, nameColumns, addressComponents }) {
   try {
     const sourceFilePath = path.join(sourceDirectory, sourceFileName);
     const outputFilePath = path.join(outputDirectory, outputFileName);
+
+    // Validate and filter addressComponents to exclude non-address columns
+    if (addressComponents && typeof addressComponents === 'object') {
+      const filteredAddressComponents = {};
+      const invalidPatterns = /\b(id|index|row|serial|number|customer|user|account|company|business|organization|employer|vendor)\b/i;
+
+      for (const [key, columnName] of Object.entries(addressComponents)) {
+        if (columnName && typeof columnName === 'string') {
+          const normalized = columnName.toLowerCase().trim();
+          // Only include if it doesn't match invalid patterns
+          if (!invalidPatterns.test(normalized)) {
+            filteredAddressComponents[key] = columnName;
+          }
+        }
+      }
+
+      // Replace addressComponents with filtered version
+      addressComponents = Object.keys(filteredAddressComponents).length > 0 ? filteredAddressComponents : null;
+    }
 
     // Check if source file exists
     try {
@@ -438,6 +461,36 @@ export async function transformAndWriteFile({ sourceDirectory, sourceFileName, o
 
         // For each of the 10 standard columns
         for (const standardColumn of STANDARD_COLUMNS) {
+          // Special handling for Name column with name combining
+          if (standardColumn === 'Name' && nameColumns) {
+            const firstNameIdx = sourceIndexMap[nameColumns.firstName];
+            const lastNameIdx = sourceIndexMap[nameColumns.lastName];
+            const middleNameIdx = nameColumns.middleName ? sourceIndexMap[nameColumns.middleName] : undefined;
+
+            const firstName = firstNameIdx !== undefined ? sourceRow[firstNameIdx] : '';
+            const lastName = lastNameIdx !== undefined ? sourceRow[lastNameIdx] : '';
+            const middleName = middleNameIdx !== undefined ? sourceRow[middleNameIdx] : '';
+
+            const combinedName = combineName(firstName, lastName, middleName);
+            transformedRow.push(combinedName);
+            continue;
+          }
+
+          // Special handling for Address column with address consolidation
+          if (standardColumn === 'Address' && addressComponents) {
+            const street = addressComponents.street ? sourceRow[sourceIndexMap[addressComponents.street]] : '';
+            const apartment = addressComponents.apartment ? sourceRow[sourceIndexMap[addressComponents.apartment]] : '';
+            const city = addressComponents.city ? sourceRow[sourceIndexMap[addressComponents.city]] : '';
+            const state = addressComponents.state ? sourceRow[sourceIndexMap[addressComponents.state]] : '';
+            const postal = addressComponents.postal ? sourceRow[sourceIndexMap[addressComponents.postal]] : '';
+            const country = addressComponents.country ? sourceRow[sourceIndexMap[addressComponents.country]] : '';
+
+            const consolidatedAddress = consolidateAddressFields(street, apartment, city, state, postal, country);
+            transformedRow.push(consolidatedAddress);
+            continue;
+          }
+
+          // Regular column mapping
           const sourceColumnName = mapping[standardColumn];
 
           if (!sourceColumnName || sourceColumnName.trim() === '') {

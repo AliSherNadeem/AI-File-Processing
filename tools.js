@@ -76,16 +76,30 @@ const analyzeColumnRelationships = async ({ headers, sampleRows }) => {
     // Normalize headers for comparison
     const normalizedHeaders = headers.map(h => normalizeColumnName(h));
 
-    // Check for name components
+    // Check for name components - use exact matching to avoid false positives
     for (const [component, variations] of Object.entries(NAME_COMPONENTS)) {
       for (const header of headers) {
         const normalized = normalizeColumnName(header);
-        if (variations.some(v => normalized.includes(v) || v.includes(normalized))) {
-          relationships.hasNameSplit = true;
+        // Use exact match or pattern contains the whole normalized name
+        // This prevents "Name" from matching "First Name" or "Last Name"
+        if (variations.some(v => normalized === v || (normalized.includes(v) && normalized.length > v.length + 2))) {
           relationships.nameComponents[component] = header;
           break;
         }
       }
+    }
+
+    // CRITICAL: Only set hasNameSplit=true if we have BOTH First Name AND Last Name
+    // AND they are DIFFERENT columns (not the same column matched twice)
+    const hasFirstName = relationships.nameComponents['First Name'];
+    const hasLastName = relationships.nameComponents['Last Name'];
+
+    if (hasFirstName && hasLastName && hasFirstName !== hasLastName) {
+      relationships.hasNameSplit = true;
+    } else {
+      // Clear nameComponents if we don't have valid split names
+      relationships.nameComponents = {};
+      relationships.hasNameSplit = false;
     }
 
     // Check for address components
@@ -460,7 +474,7 @@ export const functionDefinitions = [
   },
   {
     name: 'transformAndWriteFile',
-    description: 'EFFICIENT BATCH PROCESSING: Transforms an entire Excel/CSV file and writes output directly WITHOUT loading all rows into AI context. This is the RECOMMENDED approach for files with more than 100 rows. Instead of reading full file → transform → write separately, this does everything in one step server-side. The AI never sees the full dataset, avoiding context limits. Returns only a summary (rows processed, output file path). Use this instead of readExcelFileFull + transformRows + writeExcelFile for large files.',
+    description: 'EFFICIENT BATCH PROCESSING: Transforms an entire Excel/CSV file and writes output directly WITHOUT loading all rows into AI context. This is the RECOMMENDED approach for files with more than 100 rows. Supports name combining and address consolidation. Instead of reading full file → transform → write separately, this does everything in one step server-side. The AI never sees the full dataset, avoiding context limits. Returns only a summary (rows processed, output file path). Use this instead of readExcelFileFull + transformRows + writeExcelFile for large files.',
     parameters: {
       type: 'object',
       properties: {
@@ -470,9 +484,30 @@ export const functionDefinitions = [
         outputFileName: { type: 'string', description: 'Output file name (e.g., "processed_data.xlsx")' },
         mapping: {
           type: 'object',
-          description: 'Column mapping object from createColumnMapping (the mapping itself, not the ID)'
+          description: 'Column mapping object from createColumnMapping (the mapping itself, not the ID). Do NOT map Index, Row Number, ID columns to Amount/Quantity. Leave unmapped columns as empty string "".'
         },
-        mappingId: { type: 'string', description: 'Mapping ID (for reference only, not used internally)' }
+        mappingId: { type: 'string', description: 'Mapping ID (for reference only, not used internally)' },
+        nameColumns: {
+          type: 'object',
+          description: 'OPTIONAL: If names are split across multiple columns, provide { firstName: "First Name", lastName: "Last Name", middleName: "Middle Name" } with exact source column names. If provided, names will be combined automatically.',
+          properties: {
+            firstName: { type: 'string' },
+            lastName: { type: 'string' },
+            middleName: { type: 'string' }
+          }
+        },
+        addressComponents: {
+          type: 'object',
+          description: 'OPTIONAL: If address is split across multiple columns, provide { street: "Street", apartment: "Apt", city: "City", state: "State", country: "Country", postal: "Postal" } with exact source column names. If provided, address will be consolidated automatically.',
+          properties: {
+            street: { type: 'string' },
+            apartment: { type: 'string' },
+            city: { type: 'string' },
+            state: { type: 'string' },
+            country: { type: 'string' },
+            postal: { type: 'string' }
+          }
+        }
       },
       required: ['sourceDirectory', 'sourceFileName', 'outputDirectory', 'outputFileName', 'mapping', 'mappingId']
     }

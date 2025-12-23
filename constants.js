@@ -45,6 +45,7 @@ export const SEMANTIC_MAPPING_RULES = {
     'product', 'item', 'product name', 'item name', 'product purchased',
     'product description', 'product title', 'item description', 'sku',
     'service', 'plan', 'product_name', 'item_name', 'productname'
+    // NOTE: Company, Business, Organization, Employer, Vendor are NOT products - do not map these to Product Purchased
   ],
   'Amount': [
     'amount', 'price', 'cost', 'total', 'purchase amount', 'sale amount',
@@ -65,6 +66,10 @@ export const SEMANTIC_MAPPING_RULES = {
 
 // Sub-components for address consolidation
 // Used when address is split across multiple columns
+// NOTE: Only include actual address components. DO NOT include:
+//   - Customer ID, User ID, Account ID, Index, Row Number
+//   - Company name, Business name, Organization
+//   - Any other non-address fields
 export const ADDRESS_COMPONENTS = {
   'Street': [
     'street', 'address line 1', 'address1', 'street address',
