@@ -5,7 +5,7 @@
   "main": "process-excel-ai.js",
   "type": "module",
   "scripts": {
-    "start": "node process-excel-ai.js",
+    "start": "node init && node process-excel-ai.js",
     "test": "node test-functions.js"
   },
   "keywords": [

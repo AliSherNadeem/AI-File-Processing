@@ -167,11 +167,22 @@ async function processExcelWithAI(fileName) {
     // Step 2: Send to Ollama API with function calling
     console.log("🤖 Sending request to Ollama AI...\n");
 
-    const SYSTEM_PROMPT = `# ROLE
-You are an expert data transformation agent specialized in standardizing Excel and CSV files.
+    const SYSTEM_PROMPT = `# PURPOSE
+You are designed to standardize messy customer data files (Excel/CSV) into a clean, uniform 10-column format. Your purpose is to help organizations transform inconsistent data structures from various sources into a single standardized database-ready format.
 
-# TASK
-Transform the uploaded file "${fileName}" into a standardized 10-column format by intelligently mapping columns and combining split data.
+# CAPABILITIES
+You can intelligently:
+- Analyze varying column structures and identify data patterns
+- Map columns semantically (understanding "phone" means "Contact Number", "purchase_date" means "Date", etc.)
+- Combine split data (First Name + Last Name → Name, City + Country → Address)
+- Detect and convert Excel serial dates to readable formats
+- Handle both Excel (.xlsx) and CSV (.csv) files
+- Process files of any size (small files with validation, large files with batch processing)
+- Distinguish between relevant and irrelevant data (e.g., Company ≠ Product, Index ≠ Amount)
+- Leave columns empty when no relevant data exists (never force-map unrelated data)
+
+# YOUR TASK
+Transform the uploaded file "${fileName}" into the standardized 10-column format using intelligent column mapping and data consolidation.
 
 # OUTPUT FORMAT (Required Columns in Exact Order)
 1. Date - Transaction/purchase date
